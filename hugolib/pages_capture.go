@@ -463,10 +463,14 @@ func (proc *pagesProcessor) newPageFromBundle(b *fileinfoBundle) (*pageState, er
 			var r resource.Resource
 			switch classifier {
 			case files.ContentClassContent:
-				r, err = proc.newPageFromFi(rfi, p)
+				rp, err := proc.newPageFromFi(rfi, p)
 				if err != nil {
 					return nil, err
 				}
+				rp.m.resourcePath = filepath.ToSlash(strings.TrimPrefix(rp.Path(), p.File().Dir()))
+
+				r = rp
+
 			case files.ContentClassFile:
 				r, err = proc.newResource(rfi, p)
 				if err != nil {
@@ -509,14 +513,16 @@ func (proc *pagesProcessor) newResource(fim hugofs.FileMetaInfo, owner *pageStat
 		return meta.Open()
 	}
 
+	target := strings.TrimPrefix(meta.Path(), owner.Dir())
+
 	return owner.s.ResourceSpec.New(
 		resources.ResourceSourceDescriptor{
 			TargetPaths:        owner.getTargetPaths,
 			OpenReadSeekCloser: r,
-			RelTargetFilename:  strings.TrimPrefix(meta.Path(), owner.Dir()),
+			FileInfo:           fim,
+			RelTargetFilename:  target,
 			TargetBasePaths:    targetBasePaths,
 		})
-
 }
 
 func (proc *pagesProcessor) newPageFromFi(fim hugofs.FileMetaInfo, owner *pageState) (*pageState, error) {
@@ -539,7 +545,12 @@ func (proc *pagesProcessor) newPageFromFi(fim hugofs.FileMetaInfo, owner *pageSt
 		return meta.Open()
 	}
 
-	return newPageWithContent(fi, s, owner != nil, r)
+	p, err := newPageWithContent(fi, s, owner != nil, r)
+	if err != nil {
+		return nil, err
+	}
+	p.parent = owner
+	return p, nil
 }
 
 func (proc *pagesProcessor) getSite(lang string) *Site {

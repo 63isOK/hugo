@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gohugoio/hugo/hugofs/files"
+
 	"github.com/gohugoio/hugo/config"
 	"github.com/pkg/errors"
 	"github.com/spf13/afero"
@@ -165,15 +167,15 @@ func (m *moduleAdapter) validateAndApplyDefaults(fs afero.Fs) error {
 		if idxPathSep != -1 {
 			targetBase = mnt.Target[0:idxPathSep]
 		}
-		if !componentFoldersSet[targetBase] {
-			return errors.Wrapf(baseErr, "mount target must be one of: %v", componentFolders)
+		if !files.IsComponentFolder(targetBase) {
+			return errors.Wrapf(baseErr, "mount target must be one of: %v", files.ComponentFolders)
 		}
 	}
 
 	if len(m.modImport.Mounts) == 0 {
 		// Create default mount points for every component folder that
 		// exists in the module.
-		for _, componentFolder := range componentFolders {
+		for _, componentFolder := range files.ComponentFolders {
 			sourceDir := filepath.Join(dir, componentFolder)
 			_, err := fs.Stat(sourceDir)
 			if err == nil {
@@ -186,18 +188,5 @@ func (m *moduleAdapter) validateAndApplyDefaults(fs afero.Fs) error {
 	}
 
 	return nil
-
-}
-
-// ResolveComponentFolder returns "content" from "content/blog/foo.md" etc.
-func ResolveComponentFolder(filename string) string {
-	filename = strings.TrimPrefix(filename, string(os.PathSeparator))
-	for _, cf := range componentFolders {
-		if strings.HasPrefix(filename, cf) {
-			return cf
-		}
-	}
-
-	return ""
 
 }

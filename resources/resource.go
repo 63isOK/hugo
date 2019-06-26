@@ -135,8 +135,12 @@ type ResourceSourceDescriptor struct {
 	SourceFile         source.File
 	OpenReadSeekCloser resource.OpenReadSeekCloser
 
+	FileInfo os.FileInfo
+
 	// If OpenReadSeekerCloser is not set, we use this to open the file.
 	SourceFilename string
+
+	Fs afero.Fs
 
 	// The relative target filename without any language code.
 	RelTargetFilename string
@@ -159,19 +163,11 @@ func (r ResourceSourceDescriptor) Filename() string {
 	return r.SourceFilename
 }
 
-func (r *Spec) sourceFs() afero.Fs {
-	return r.PathSpec.BaseFs.Content.Fs
-}
-
 func (r *Spec) New(fd ResourceSourceDescriptor) (resource.Resource, error) {
-	return r.newResourceForFs(r.sourceFs(), fd)
+	return r.newResourceFor(fd)
 }
 
-func (r *Spec) NewForFs(sourceFs afero.Fs, fd ResourceSourceDescriptor) (resource.Resource, error) {
-	return r.newResourceForFs(sourceFs, fd)
-}
-
-func (r *Spec) newResourceForFs(sourceFs afero.Fs, fd ResourceSourceDescriptor) (resource.Resource, error) {
+func (r *Spec) newResourceFor(fd ResourceSourceDescriptor) (resource.Resource, error) {
 	if fd.OpenReadSeekCloser == nil {
 		if fd.SourceFile != nil && fd.SourceFilename != "" {
 			return nil, errors.New("both SourceFile and AbsSourceFilename provided")
@@ -189,11 +185,11 @@ func (r *Spec) newResourceForFs(sourceFs afero.Fs, fd ResourceSourceDescriptor) 
 		fd.TargetBasePaths = r.MultihostTargetBasePaths
 	}
 
-	return r.newResource(sourceFs, fd)
+	return r.newResource(fd.Fs, fd)
 }
 
 func (r *Spec) newResource(sourceFs afero.Fs, fd ResourceSourceDescriptor) (resource.Resource, error) {
-	var fi os.FileInfo
+	fi := fd.FileInfo
 	var sourceFilename string
 
 	if fd.OpenReadSeekCloser != nil {
@@ -208,7 +204,6 @@ func (r *Spec) newResource(sourceFs afero.Fs, fd ResourceSourceDescriptor) (reso
 		}
 		sourceFilename = fd.SourceFilename
 	} else {
-		fi = fd.SourceFile.FileInfo()
 		sourceFilename = fd.SourceFile.Filename()
 	}
 
@@ -375,7 +370,7 @@ type genericResource struct {
 
 	// This may be set to tell us to look in another filesystem for this resource.
 	// We, by default, use the sourceFs filesystem in the spec below.
-	overriddenSourceFs afero.Fs
+	sourceFs afero.Fs
 
 	spec *Spec
 
@@ -414,7 +409,7 @@ func (l *genericResource) ReadSeekCloser() (hugio.ReadSeekCloser, error) {
 		return fim.Meta().Open()
 	}
 	// TODO(bep) mod
-	f, err := l.sourceFs().Open(l.sourceFilename)
+	f, err := l.getSourceFs().Open(l.sourceFilename)
 	if err != nil {
 		return nil, err
 	}
@@ -500,11 +495,8 @@ func (l *genericResource) initContent() error {
 	return err
 }
 
-func (l *genericResource) sourceFs() afero.Fs {
-	if l.overriddenSourceFs != nil {
-		return l.overriddenSourceFs
-	}
-	return l.spec.sourceFs()
+func (l *genericResource) getSourceFs() afero.Fs {
+	return l.sourceFs
 }
 
 func (l *genericResource) publishIfNeeded() {
@@ -745,7 +737,7 @@ func (r *Spec) newGenericResourceWithBase(
 		openReadSeekerCloser:   openReadSeekerCloser,
 		publishOnce:            po,
 		resourcePathDescriptor: pathDescriptor,
-		overriddenSourceFs:     sourceFs,
+		sourceFs:               sourceFs,
 		osFileInfo:             osFileInfo,
 		sourceFilename:         sourceFilename,
 		mediaType:              mediaType,

@@ -630,11 +630,7 @@ func (c *capturer) readDir(dirname hugofs.FileMetaInfo) ([]os.FileInfo, error) {
 }
 
 func (c *capturer) newFileInfo(fi hugofs.FileMetaInfo, tp bundleDirType) (*fileInfo, bool, error) {
-	f, err := newFileInfo(c.sourceSpec, fi, tp)
-	if err != nil {
-		return nil, false, err
-	}
-	return f, !f.disabled, nil
+	return nil, false, nil
 }
 
 type bundleDirs struct {

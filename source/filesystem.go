@@ -28,7 +28,7 @@ import (
 
 // Filesystem represents a source filesystem.
 type Filesystem struct {
-	files        []ReadableFile
+	files        []File
 	filesInit    sync.Once
 	filesInitErr error
 
@@ -37,11 +37,6 @@ type Filesystem struct {
 	fi hugofs.FileMetaInfo
 
 	SourceSpec
-}
-
-// Input describes a source input.
-type Input interface {
-	Files() []ReadableFile
 }
 
 // NewFilesystem returns a new filesytem for a given source spec.
@@ -54,7 +49,7 @@ func (sp SourceSpec) NewFilesystemFromFileMetaInfo(fi hugofs.FileMetaInfo) *File
 }
 
 // Files returns a slice of readable files.
-func (f *Filesystem) Files() ([]ReadableFile, error) {
+func (f *Filesystem) Files() ([]File, error) {
 	f.filesInit.Do(func() {
 		err := f.captureFiles()
 		if err != nil {
@@ -66,14 +61,14 @@ func (f *Filesystem) Files() ([]ReadableFile, error) {
 
 // add populates a file in the Filesystem.files
 func (f *Filesystem) add(name string, fi hugofs.FileMetaInfo) (err error) {
-	var file ReadableFile
+	var file File
 
 	if runtime.GOOS == "darwin" {
 		// When a file system is HFS+, its filepath is in NFD form.
 		// TODO(bep) mod move this to hugofs name = norm.NFC.String(name)
 	}
 
-	file, err = f.SourceSpec.NewFileInfoOld(fi, false)
+	file, err = f.SourceSpec.NewFileInfo(fi)
 	if err != nil {
 		return err
 	}

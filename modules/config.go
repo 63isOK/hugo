@@ -14,34 +14,10 @@
 package modules
 
 import (
-	"sort"
-
 	"github.com/gohugoio/hugo/config"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 )
-
-var (
-	componentFolders = []string{
-		"archetypes",
-		"static",
-		"layouts",
-		"content",
-		"data",
-		"i18n",
-		"assets",
-		"resources",
-	}
-
-	componentFoldersSet = make(map[string]bool)
-)
-
-func init() {
-	sort.Strings(componentFolders)
-	for _, f := range componentFolders {
-		componentFoldersSet[f] = true
-	}
-}
 
 type Config struct {
 	Imports []Import

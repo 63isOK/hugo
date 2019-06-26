@@ -52,7 +52,10 @@ func NewContent(
 
 	if isDir {
 
-		langFs := afero.NewMemMapFs() // TODO(bep) mod hugofs.NewLanguageFs(s.Language().Lang, sites.LanguageSet(), archetypeFs)
+		langFs, err := hugofs.NewLanguageFs2(sites.LanguageSet(), archetypeFs)
+		if err != nil {
+			return err
+		}
 
 		cm, err := mapArcheTypeDir(ps, langFs, archetypeFilename)
 		if err != nil {
@@ -194,7 +197,7 @@ func mapArcheTypeDir(
 
 	var m archetypeMap
 
-	walkFn := func(filename string, fi os.FileInfo, err error) error {
+	walkFn := func(path string, fi hugofs.FileMetaInfo, err error) error {
 
 		if err != nil {
 			return err
@@ -206,10 +209,10 @@ func mapArcheTypeDir(
 
 		fil := fi.(hugofs.FileMetaInfo)
 
-		if files.IsContentFile(filename) {
+		if files.IsContentFile(path) {
 			m.contentFiles = append(m.contentFiles, fil)
 			if !m.siteUsed {
-				m.siteUsed, err = usesSiteVar(fs, filename)
+				m.siteUsed, err = usesSiteVar(fs, path)
 				if err != nil {
 					return err
 				}
@@ -222,7 +225,15 @@ func mapArcheTypeDir(
 		return nil
 	}
 
-	if err := helpers.SymbolicWalk(fs, archetypeDir, walkFn); err != nil {
+	walkCfg := hugofs.WalkwayConfig{
+		WalkFn: walkFn,
+		Fs:     fs,
+		Root:   archetypeDir,
+	}
+
+	w := hugofs.NewWalkway(walkCfg)
+
+	if err := w.Walk(); err != nil {
 		return m, errors.Wrapf(err, "failed to walk archetype dir %q", archetypeDir)
 	}
 

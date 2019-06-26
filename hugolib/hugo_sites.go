@@ -825,10 +825,10 @@ func (h *HugoSites) loadData(fis []hugofs.FileMetaInfo) (err error) {
 	return
 }
 
-func (h *HugoSites) handleDataFile(r source.ReadableFile) error {
+func (h *HugoSites) handleDataFile(r source.File) error {
 	var current map[string]interface{}
 
-	f, err := r.Open()
+	f, err := r.FileInfo().Meta().Open()
 	if err != nil {
 		return errors.Wrapf(err, "data: failed to open %q:", r.LogicalName())
 	}
@@ -921,8 +921,8 @@ func (h *HugoSites) errWithFileContext(err error, f source.File) error {
 	return err
 }
 
-func (h *HugoSites) readData(f source.ReadableFile) (interface{}, error) {
-	file, err := f.Open()
+func (h *HugoSites) readData(f source.File) (interface{}, error) {
+	file, err := f.FileInfo().Meta().Open()
 	if err != nil {
 		return nil, errors.Wrap(err, "readData: failed to open data file")
 	}

@@ -35,6 +35,7 @@ var (
 	_ afero.File    = (*sliceDir)(nil)
 )
 
+// TODO(bep) mod remove all of the below
 func NewLanguageFs(langs map[string]bool, sources ...FileMetaInfo) (afero.Fs, error) {
 	if len(sources) == 0 {
 		return NoOpFs, nil

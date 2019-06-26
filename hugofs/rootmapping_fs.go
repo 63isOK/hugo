@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gohugoio/hugo/modules"
+	"github.com/gohugoio/hugo/hugofs/files"
 
 	"github.com/pkg/errors"
 
@@ -38,7 +38,7 @@ func NewRootMappingFs(fs afero.Fs, rms ...RootMapping) (*RootMappingFs, error) {
 	for _, rm := range rms {
 		(&rm).clean()
 
-		fromBase := modules.ResolveComponentFolder(rm.From)
+		fromBase := files.ResolveComponentFolder(rm.From)
 		if fromBase == "" {
 			panic("TODO(bep) unrecognised base: " + rm.From) // TODO(bep) mod
 		}

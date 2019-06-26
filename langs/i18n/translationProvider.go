@@ -88,8 +88,8 @@ func (tp *TranslationProvider) Update(d *deps.Deps) error {
 
 }
 
-func addTranslationFile(bundle *bundle.Bundle, r source.ReadableFile) error {
-	f, err := r.Open()
+func addTranslationFile(bundle *bundle.Bundle, r source.File) error {
+	f, err := r.FileInfo().Meta().Open()
 	if err != nil {
 		return _errors.Wrapf(err, "failed to open translations file %q:", r.LogicalName())
 	}
@@ -108,14 +108,15 @@ func (tp *TranslationProvider) Clone(d *deps.Deps) error {
 	return nil
 }
 
-func errWithFileContext(inerr error, r source.ReadableFile) error {
+func errWithFileContext(inerr error, r source.File) error {
 	fim, ok := r.FileInfo().(hugofs.FileMetaInfo)
 	if !ok {
 		return inerr
 	}
 
-	realFilename := fim.Meta().Filename()
-	f, err := r.Open()
+	meta := fim.Meta()
+	realFilename := meta.Filename()
+	f, err := meta.Open()
 	if err != nil {
 		return inerr
 	}

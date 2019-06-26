@@ -86,19 +86,3 @@ path="github.com/bep/mycomponent"
 	assert.Error(err)
 
 }
-
-func TestComponentFolders(t *testing.T) {
-	assert := require.New(t)
-
-	// It's important that these are absolutely right and not changed.
-	assert.Equal(len(componentFolders), len(componentFoldersSet))
-	assert.True(componentFoldersSet["archetypes"])
-	assert.True(componentFoldersSet["layouts"])
-	assert.True(componentFoldersSet["data"])
-	assert.True(componentFoldersSet["i18n"])
-	assert.True(componentFoldersSet["assets"])
-	assert.True(componentFoldersSet["resources"])
-	assert.True(componentFoldersSet["static"])
-	assert.True(componentFoldersSet["content"])
-
-}

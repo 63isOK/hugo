@@ -14,7 +14,9 @@
 package files
 
 import (
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -67,4 +69,42 @@ func ClassifyContentFile(filename string) string {
 	}
 
 	return ContentClassContent
+}
+
+var (
+	ComponentFolders = []string{
+		"archetypes",
+		"static",
+		"layouts",
+		"content",
+		"data",
+		"i18n",
+		"assets",
+		"resources",
+	}
+
+	componentFoldersSet = make(map[string]bool)
+)
+
+func init() {
+	sort.Strings(ComponentFolders)
+	for _, f := range ComponentFolders {
+		componentFoldersSet[f] = true
+	}
+}
+
+// ResolveComponentFolder returns "content" from "content/blog/foo.md" etc.
+func ResolveComponentFolder(filename string) string {
+	filename = strings.TrimPrefix(filename, string(os.PathSeparator))
+	for _, cf := range ComponentFolders {
+		if strings.HasPrefix(filename, cf) {
+			return cf
+		}
+	}
+
+	return ""
+}
+
+func IsComponentFolder(name string) bool {
+	return componentFoldersSet[name]
 }

@@ -15,12 +15,9 @@ package source
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/gohugoio/hugo/helpers"
-
-	"github.com/gohugoio/hugo/hugofs"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,57 +52,10 @@ func TestFileInfo(t *testing.T) {
 
 		}},
 	} {
-		f := s.NewFileInfoOld(this.base, this.filename, false, nil)
+		path := strings.TrimPrefix(this.filename, this.base)
+		f, err := s.NewFileInfoFrom(path, this.filename)
+		assert.NoError(err)
 		this.assert(f)
 	}
 
-}
-
-func TestFileInfoLanguage(t *testing.T) {
-	assert := require.New(t)
-	langs := map[string]bool{
-		"sv": true,
-		"en": true,
-	}
-
-	m := afero.NewMemMapFs()
-	lfs, err := hugofs.NewLanguageFs(langs, hugofs.NewLangFsProvider("sv", m))
-	assert.NoError(err)
-	v := newTestConfig()
-
-	fs := hugofs.NewFrom(m, v)
-
-	ps, err := helpers.NewPathSpec(fs, v)
-	assert.NoError(err)
-	s := SourceSpec{SourceFs: lfs, PathSpec: ps}
-	s.Languages = map[string]interface{}{
-		"en": true,
-	}
-
-	err = afero.WriteFile(lfs, "page.md", []byte("abc"), 0777)
-	assert.NoError(err)
-	err = afero.WriteFile(lfs, "page.en.md", []byte("abc"), 0777)
-	assert.NoError(err)
-
-	sv, _ := lfs.Stat("page.md")
-	en, _ := lfs.Stat("page.en.md")
-
-	fiSv := s.NewFileInfoOld("", "page.md", false, sv)
-	fiEn := s.NewFileInfoOld("", "page.en.md", false, en)
-
-	assert.Equal("sv", fiSv.Lang())
-	assert.Equal("en", fiEn.Lang())
-
-	// test contentBaseName implementation
-	fi := s.NewFileInfoOld("", "2018-10-01-contentbasename.md", false, nil)
-	assert.Equal("2018-10-01-contentbasename", fi.ContentBaseName())
-
-	fi = s.NewFileInfoOld("", "2018-10-01-contentbasename.en.md", false, nil)
-	assert.Equal("2018-10-01-contentbasename", fi.ContentBaseName())
-
-	fi = s.NewFileInfoOld("", filepath.Join("2018-10-01-contentbasename", "index.en.md"), true, nil)
-	assert.Equal("2018-10-01-contentbasename", fi.ContentBaseName())
-
-	fi = s.NewFileInfoOld("", filepath.Join("2018-10-01-contentbasename", "_index.en.md"), false, nil)
-	assert.Equal("_index", fi.ContentBaseName())
 }

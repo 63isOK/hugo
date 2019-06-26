@@ -29,3 +29,21 @@ func TestIsContentFile(t *testing.T) {
 	assert.True(IsContentExt("md"))
 	assert.False(IsContentExt("json"))
 }
+
+func TestComponentFolders(t *testing.T) {
+	assert := require.New(t)
+
+	// It's important that these are absolutely right and not changed.
+	assert.Equal(len(ComponentFolders), len(componentFoldersSet))
+	assert.True(IsComponentFolder("archetypes"))
+	assert.True(IsComponentFolder("layouts"))
+	assert.True(IsComponentFolder("data"))
+	assert.True(IsComponentFolder("i18n"))
+	assert.True(IsComponentFolder("assets"))
+	assert.True(IsComponentFolder("resources"))
+	assert.True(IsComponentFolder("static"))
+	assert.True(IsComponentFolder("content"))
+	assert.False(IsComponentFolder("foo"))
+	assert.False(IsComponentFolder(""))
+
+}

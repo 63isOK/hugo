@@ -93,28 +93,6 @@ func newFileInfo2(sp *source.SourceSpec, fi hugofs.FileMetaInfo) (*fileInfo, err
 
 }
 
-// TODO(bep) mod remove
-func newFileInfo(sp *source.SourceSpec, fi hugofs.FileMetaInfo, tp bundleDirType) (*fileInfo, error) {
-
-	baseFi, err := sp.NewFileInfoOld(fi, tp == bundleLeaf)
-	if err != nil {
-		return nil, err
-	}
-
-	f := &fileInfo{
-		//		bundleTp: tp,
-		File: baseFi,
-	}
-
-	lang := f.Lang()
-
-	// TODO(bep) mod do this ... somewhere else.
-	f.disabled = lang != "" && sp.DisabledLanguages[lang]
-
-	return f, nil
-
-}
-
 type bundleDirType int
 
 const (
