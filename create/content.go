@@ -69,7 +69,7 @@ func NewContent(
 		}
 
 		name := filepath.Base(targetPath)
-		return newContentFromDir(archetypeFilename, sites, archetypeFs, sourceFs, cm, name, contentPath)
+		return newContentFromDir(archetypeFilename, sites, sourceFs, cm, name, contentPath)
 	}
 
 	// Building the sites can be expensive, so only do it if really needed.
@@ -128,13 +128,14 @@ func targetSite(sites *hugolib.HugoSites, fi hugofs.FileMetaInfo) *hugolib.Site 
 func newContentFromDir(
 	archetypeDir string,
 	sites *hugolib.HugoSites,
-	sourceFs, targetFs afero.Fs,
+	targetFs afero.Fs,
 	cm archetypeMap, name, targetPath string) error {
 
 	for _, f := range cm.otherFiles {
-		filename := f.Meta().Filename()
+		meta := f.Meta()
+		filename := meta.Path()
 		// Just copy the file to destination.
-		in, err := sourceFs.Open(filename)
+		in, err := meta.Open()
 		if err != nil {
 			return errors.Wrap(err, "failed to open non-content file")
 		}
@@ -161,7 +162,7 @@ func newContentFromDir(
 	}
 
 	for _, f := range cm.contentFiles {
-		filename := f.Meta().Filename()
+		filename := f.Meta().Path()
 		s := targetSite(sites, f)
 		targetFilename := filepath.Join(targetPath, strings.TrimPrefix(filename, archetypeDir))
 

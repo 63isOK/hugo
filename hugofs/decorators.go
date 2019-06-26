@@ -212,7 +212,7 @@ func (l *baseFileDecoratorFile) Readdir(c int) (ofi []os.FileInfo, err error) {
 		// We need to resolve any symlink info.
 		fi, err := lstatIfPossible(l.fs.Fs, filename)
 		if err != nil {
-			return nil, errors.Wrap(err, "lstat")
+			return nil, err
 		}
 		fi, err = l.fs.decorate(fi, filename)
 		if err != nil {

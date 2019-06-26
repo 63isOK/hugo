@@ -164,7 +164,7 @@ func (fs *SliceFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 	fi, _, err := fs.pickFirst(name)
 
 	if err != nil {
-		return nil, false, errors.Wrap(err, "stat")
+		return nil, false, err
 	}
 
 	if fi.IsDir() {

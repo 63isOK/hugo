@@ -147,7 +147,7 @@ func (fs *FilterFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
 	fi, err := lstatIfPossible(fs.fs, name)
 
 	if err != nil {
-		return nil, false, errors.Wrap(err, "stat")
+		return nil, false, err
 	}
 
 	if fi.IsDir() {

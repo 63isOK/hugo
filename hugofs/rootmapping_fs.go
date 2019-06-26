@@ -214,7 +214,7 @@ func (fs *RootMappingFs) Open(name string) (afero.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &rootMappingFile2{File: f, fs: fs, meta: meta}, nil
+		return &rootMappingFile2{File: f, fs: fs, name: name, meta: meta}, nil
 	}
 
 	if !multifi.IsDir() {
@@ -228,7 +228,7 @@ func (fs *RootMappingFs) Open(name string) (afero.File, error) {
 func (fs *RootMappingFs) newUnionFile(fis ...FileMetaInfo) (afero.File, error) {
 	meta := fis[0].Meta()
 	f, err := meta.Open()
-	f = &rootMappingFile2{File: f, fs: fs, meta: meta}
+	f = &rootMappingFile2{File: f, fs: fs, name: meta.Name(), meta: meta}
 	if len(fis) == 1 {
 		return f, err
 	}
@@ -427,7 +427,12 @@ func (f *rootMappingFile) Readdirnames(count int) ([]string, error) {
 type rootMappingFile2 struct {
 	afero.File
 	fs   *RootMappingFs
+	name string
 	meta FileMeta
+}
+
+func (f *rootMappingFile2) Name() string {
+	return f.name
 }
 
 func (f *rootMappingFile2) Readdir(count int) ([]os.FileInfo, error) {
