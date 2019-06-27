@@ -53,10 +53,22 @@ func newPagesCollector(sp *source.SourceSpec, logger *loggers.Logger, proc pages
 	}
 }
 
+func newPagesProcessor(h *HugoSites, sp *source.SourceSpec, partialBuild bool) *pagesProcessor {
+
+	return &pagesProcessor{
+		h:            h,
+		sp:           sp,
+		partialBuild: partialBuild,
+		numWorkers:   config.GetNumWorkerMultiplier() * 3,
+	}
+}
+
 type fileinfoBundle struct {
 	header    hugofs.FileMetaInfo
 	resources []hugofs.FileMetaInfo
 }
+
+type pageBundles map[string]*fileinfoBundle
 
 type pagesCollector struct {
 	sp     *source.SourceSpec
@@ -149,14 +161,15 @@ func (c *pagesCollector) Collect() error {
 		HookPre: preHook,
 		WalkFn:  wfn})
 
-	err := w.Walk()
+	walkErr := w.Walk()
 
-	if err != nil {
-		return err
+	err := c.proc.Wait()
+
+	if walkErr != nil {
+		return walkErr
 	}
 
-	return c.proc.Wait()
-
+	return err
 }
 
 func (c *pagesCollector) isBundleHeader(fi hugofs.FileMetaInfo) bool {
@@ -240,15 +253,6 @@ func (c *pagesCollector) addToBundle(info hugofs.FileMetaInfo, bundles pageBundl
 	}
 }
 
-func stringSliceContains(k string, values ...string) bool {
-	for _, v := range values {
-		if k == v {
-			return true
-		}
-	}
-	return false
-}
-
 func (c *pagesCollector) cloneFileInfo(fi hugofs.FileMetaInfo) hugofs.FileMetaInfo {
 	cm := hugofs.FileMeta{}
 	meta := fi.Meta()
@@ -261,8 +265,6 @@ func (c *pagesCollector) cloneFileInfo(fi hugofs.FileMetaInfo) hugofs.FileMetaIn
 
 	return hugofs.NewFileMetaInfo(fi, cm)
 }
-
-type pageBundles map[string]*fileinfoBundle
 
 func (c *pagesCollector) handleBundleBranch(readdir []hugofs.FileMetaInfo) error {
 
@@ -339,19 +341,9 @@ func (c *pagesCollector) handleFiles(fis ...hugofs.FileMetaInfo) error {
 }
 
 type pagesCollectorProcessorProvider interface {
-	Start(ctx context.Context) context.Context
 	Process(item interface{}) error
+	Start(ctx context.Context) context.Context
 	Wait() error
-}
-
-func newPagesProcessor(h *HugoSites, sp *source.SourceSpec, partialBuild bool) *pagesProcessor {
-
-	return &pagesProcessor{
-		h:            h,
-		sp:           sp,
-		partialBuild: partialBuild,
-		numWorkers:   config.GetNumWorkerMultiplier() * 3,
-	}
 }
 
 type pagesProcessor struct {
@@ -370,75 +362,9 @@ type pagesProcessor struct {
 	partialBuild bool
 }
 
-func (proc *pagesProcessor) sendError(err error) {
-	if err == nil {
-		return
-	}
-	proc.h.SendError(err)
-}
-
-func (proc *pagesProcessor) shouldSkip(fim hugofs.FileMetaInfo) bool {
-	return proc.sp.DisabledLanguages[fim.Meta().Lang()]
-}
 func (proc *pagesProcessor) Process(item interface{}) error {
 	proc.itemChan <- item
 	return nil
-}
-
-func (proc *pagesProcessor) process(item interface{}) error {
-	send := func(p *pageState, err error) {
-		if err != nil {
-			proc.sendError(err)
-		} else {
-			proc.pagesChan <- p
-		}
-	}
-
-	switch v := item.(type) {
-	// Page bundles mapped to their language.
-	case pageBundles:
-		for _, bundle := range v {
-			if proc.shouldSkip(bundle.header) {
-				continue
-			}
-			send(proc.newPageFromBundle(bundle))
-		}
-	case hugofs.FileMetaInfo:
-		if proc.shouldSkip(v) {
-			return nil
-		}
-		meta := v.Meta()
-
-		classifier := meta.Classifier()
-		switch classifier {
-		case files.ContentClassContent:
-			send(proc.newPageFromFi(v, nil))
-		case files.ContentClassFile:
-			proc.sendError(proc.copyFile(v))
-		default:
-			panic(fmt.Sprintf("invalid classifier: %q", classifier))
-		}
-	default:
-		panic(fmt.Sprintf("unrecognized item type in Process: %T", item))
-	}
-
-	return nil
-}
-
-func (proc *pagesProcessor) copyFile(fim hugofs.FileMetaInfo) error {
-	meta := fim.Meta()
-	s := proc.getSite(meta.Lang())
-	f, err := meta.Open()
-	if err != nil {
-		return errors.Wrap(err, "copyFile: failed to open")
-	}
-
-	target := filepath.Join(s.PathSpec.GetTargetLanguageBasePath(), meta.Path())
-
-	defer f.Close()
-
-	return s.publish(&s.PathSpec.ProcessingStats.Files, target, f)
-
 }
 
 func (proc *pagesProcessor) Start(ctx context.Context) context.Context {
@@ -536,6 +462,34 @@ func (proc *pagesProcessor) newPageFromBundle(b *fileinfoBundle) (*pageState, er
 	return p, nil
 }
 
+func (proc *pagesProcessor) newPageFromFi(fim hugofs.FileMetaInfo, owner *pageState) (*pageState, error) {
+	fi, err := newFileInfo2(proc.sp, fim)
+	if err != nil {
+		return nil, err
+	}
+
+	var s *Site
+	meta := fim.Meta()
+
+	if owner != nil {
+		s = owner.s
+	} else {
+		lang := meta.Lang()
+		s = proc.getSite(lang)
+	}
+
+	r := func() (hugio.ReadSeekCloser, error) {
+		return meta.Open()
+	}
+
+	p, err := newPageWithContent(fi, s, owner != nil, r)
+	if err != nil {
+		return nil, err
+	}
+	p.parent = owner
+	return p, nil
+}
+
 func (proc *pagesProcessor) newResource(fim hugofs.FileMetaInfo, owner *pageState) (resource.Resource, error) {
 
 	// TODO(bep) consolidate with multihost logic + clean up
@@ -571,34 +525,6 @@ func (proc *pagesProcessor) newResource(fim hugofs.FileMetaInfo, owner *pageStat
 		})
 }
 
-func (proc *pagesProcessor) newPageFromFi(fim hugofs.FileMetaInfo, owner *pageState) (*pageState, error) {
-	fi, err := newFileInfo2(proc.sp, fim)
-	if err != nil {
-		return nil, err
-	}
-
-	var s *Site
-	meta := fim.Meta()
-
-	if owner != nil {
-		s = owner.s
-	} else {
-		lang := meta.Lang()
-		s = proc.getSite(lang)
-	}
-
-	r := func() (hugio.ReadSeekCloser, error) {
-		return meta.Open()
-	}
-
-	p, err := newPageWithContent(fi, s, owner != nil, r)
-	if err != nil {
-		return nil, err
-	}
-	p.parent = owner
-	return p, nil
-}
-
 func (proc *pagesProcessor) getSite(lang string) *Site {
 	if lang == "" {
 		return proc.h.Sites[0]
@@ -610,4 +536,80 @@ func (proc *pagesProcessor) getSite(lang string) *Site {
 		}
 	}
 	return proc.h.Sites[0]
+}
+
+func (proc *pagesProcessor) copyFile(fim hugofs.FileMetaInfo) error {
+	meta := fim.Meta()
+	s := proc.getSite(meta.Lang())
+	f, err := meta.Open()
+	if err != nil {
+		return errors.Wrap(err, "copyFile: failed to open")
+	}
+
+	target := filepath.Join(s.PathSpec.GetTargetLanguageBasePath(), meta.Path())
+
+	defer f.Close()
+
+	return s.publish(&s.PathSpec.ProcessingStats.Files, target, f)
+
+}
+
+func (proc *pagesProcessor) process(item interface{}) error {
+	send := func(p *pageState, err error) {
+		if err != nil {
+			proc.sendError(err)
+		} else {
+			proc.pagesChan <- p
+		}
+	}
+
+	switch v := item.(type) {
+	// Page bundles mapped to their language.
+	case pageBundles:
+		for _, bundle := range v {
+			if proc.shouldSkip(bundle.header) {
+				continue
+			}
+			send(proc.newPageFromBundle(bundle))
+		}
+	case hugofs.FileMetaInfo:
+		if proc.shouldSkip(v) {
+			return nil
+		}
+		meta := v.Meta()
+
+		classifier := meta.Classifier()
+		switch classifier {
+		case files.ContentClassContent:
+			send(proc.newPageFromFi(v, nil))
+		case files.ContentClassFile:
+			proc.sendError(proc.copyFile(v))
+		default:
+			panic(fmt.Sprintf("invalid classifier: %q", classifier))
+		}
+	default:
+		panic(fmt.Sprintf("unrecognized item type in Process: %T", item))
+	}
+
+	return nil
+}
+
+func (proc *pagesProcessor) sendError(err error) {
+	if err == nil {
+		return
+	}
+	proc.h.SendError(err)
+}
+
+func (proc *pagesProcessor) shouldSkip(fim hugofs.FileMetaInfo) bool {
+	return proc.sp.DisabledLanguages[fim.Meta().Lang()]
+}
+
+func stringSliceContains(k string, values ...string) bool {
+	for _, v := range values {
+		if k == v {
+			return true
+		}
+	}
+	return false
 }
