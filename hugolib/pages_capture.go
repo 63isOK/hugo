@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gohugoio/hugo/config"
+
 	"github.com/gohugoio/hugo/hugofs/files"
 
 	"github.com/gohugoio/hugo/resources"
@@ -42,7 +44,6 @@ import (
 const contentClassifierMetaKey = "classifier"
 
 func newPagesCollector(sp *source.SourceSpec, logger *loggers.Logger, proc pagesCollectorProcessorProvider) *pagesCollector {
-	//numWorkers := config.GetNumWorkerMultiplier() * 3
 
 	return &pagesCollector{
 		fs:     sp.SourceFs,
@@ -58,10 +59,9 @@ type fileinfoBundle struct {
 }
 
 type pagesCollector struct {
-	sp         *source.SourceSpec
-	fs         afero.Fs
-	logger     *loggers.Logger
-	numWorkers int
+	sp     *source.SourceSpec
+	fs     afero.Fs
+	logger *loggers.Logger
 
 	proc pagesCollectorProcessorProvider
 }
@@ -150,8 +150,6 @@ func (c *pagesCollector) Collect() error {
 		WalkFn:  wfn})
 
 	err := w.Walk()
-
-	c.proc.Close()
 
 	if err != nil {
 		return err
@@ -341,18 +339,18 @@ func (c *pagesCollector) handleFiles(fis ...hugofs.FileMetaInfo) error {
 }
 
 type pagesCollectorProcessorProvider interface {
-	Close()
-	Process(item interface{}) error
 	Start(ctx context.Context) context.Context
+	Process(item interface{}) error
 	Wait() error
 }
 
 func newPagesProcessor(h *HugoSites, sp *source.SourceSpec, partialBuild bool) *pagesProcessor {
+
 	return &pagesProcessor{
 		h:            h,
 		sp:           sp,
 		partialBuild: partialBuild,
-		pagesChan:    make(chan *pageState, 4),
+		numWorkers:   config.GetNumWorkerMultiplier() * 3,
 	}
 }
 
@@ -360,16 +358,16 @@ type pagesProcessor struct {
 	h  *HugoSites
 	sp *source.SourceSpec
 
+	itemChan  chan interface{}
+	itemGroup *errgroup.Group
+
 	// The output Pages
-	pagesChan chan *pageState
+	pagesChan  chan *pageState
+	pagesGroup *errgroup.Group
 
-	partialBuild bool // TODO(bep) mod set
+	numWorkers int
 
-	g *errgroup.Group
-}
-
-func (proc *pagesProcessor) Close() {
-	close(proc.pagesChan)
+	partialBuild bool
 }
 
 func (proc *pagesProcessor) sendError(err error) {
@@ -382,8 +380,12 @@ func (proc *pagesProcessor) sendError(err error) {
 func (proc *pagesProcessor) shouldSkip(fim hugofs.FileMetaInfo) bool {
 	return proc.sp.DisabledLanguages[fim.Meta().Lang()]
 }
-
 func (proc *pagesProcessor) Process(item interface{}) error {
+	proc.itemChan <- item
+	return nil
+}
+
+func (proc *pagesProcessor) process(item interface{}) error {
 	send := func(p *pageState, err error) {
 		if err != nil {
 			proc.sendError(err)
@@ -440,12 +442,56 @@ func (proc *pagesProcessor) copyFile(fim hugofs.FileMetaInfo) error {
 }
 
 func (proc *pagesProcessor) Start(ctx context.Context) context.Context {
-	g, ctx := proc.startProcessor(ctx)
-	proc.g = g
+	proc.pagesChan = make(chan *pageState, proc.numWorkers)
+	proc.pagesGroup, ctx = errgroup.WithContext(ctx)
+	proc.itemChan = make(chan interface{}, proc.numWorkers)
+	proc.itemGroup, ctx = errgroup.WithContext(ctx)
+
+	// We could possibly make this parallel per site,
+	// but let us keep this as one Go routine for now.
+	proc.pagesGroup.Go(func() error {
+		for p := range proc.pagesChan {
+			s := p.s
+			p.forceRender = proc.partialBuild
+
+			if p.forceRender {
+				s.replacePage(p)
+			} else {
+				s.addPage(p)
+			}
+		}
+		return nil
+	})
+
+	for i := 0; i < proc.numWorkers; i++ {
+		proc.itemGroup.Go(func() error {
+			for item := range proc.itemChan {
+				if err := proc.process(item); err != nil {
+					// TODO(bep) mod handle global cancellation
+					proc.h.SendError(err)
+				}
+			}
+
+			return nil
+		})
+	}
+
 	return ctx
 }
 
-func (proc *pagesProcessor) Wait() error { return proc.g.Wait() }
+func (proc *pagesProcessor) Wait() error {
+	close(proc.itemChan)
+
+	err := proc.itemGroup.Wait()
+
+	close(proc.pagesChan)
+
+	if err != nil {
+		return err
+	}
+
+	return proc.pagesGroup.Wait()
+}
 
 func (proc *pagesProcessor) newPageFromBundle(b *fileinfoBundle) (*pageState, error) {
 	p, err := proc.newPageFromFi(b.header, nil)
@@ -564,24 +610,4 @@ func (proc *pagesProcessor) getSite(lang string) *Site {
 		}
 	}
 	return proc.h.Sites[0]
-}
-
-func (proc *pagesProcessor) startProcessor(ctx context.Context) (*errgroup.Group, context.Context) {
-	proc.pagesChan = make(chan *pageState, 4)
-	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		for p := range proc.pagesChan {
-			s := p.s
-			p.forceRender = proc.partialBuild
-
-			if p.forceRender {
-				s.replacePage(p)
-			} else {
-				s.addPage(p)
-			}
-		}
-		return nil
-	})
-
-	return g, ctx
 }

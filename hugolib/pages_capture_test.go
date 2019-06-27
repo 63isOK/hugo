@@ -62,8 +62,6 @@ func TestPagesCaptureNew(t *testing.T) {
 type testPagesCollectorProcessor struct {
 }
 
-func (proc *testPagesCollectorProcessor) Close() {}
-
 func (proc *testPagesCollectorProcessor) Process(item interface{}) error {
 	fmt.Println("PROCESS:", item)
 	return nil
