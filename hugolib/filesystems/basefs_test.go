@@ -231,7 +231,7 @@ func TestRealDirs(t *testing.T) {
 	checkFileCount(bfs.Resources.Fs, "", assert, 3)
 
 	assert.NotNil(bfs.theBigFs)
-	fi, _, err := bfs.theBigFs.overlay.(afero.Lstater).LstatIfPossible(filepath.Join("resources", "t1.txt"))
+	fi, _, err := bfs.theBigFs.overlayMounts.(afero.Lstater).LstatIfPossible(filepath.Join("resources", "t1.txt"))
 	assert.NoError(err)
 	assert.Equal("t1.txt", fi.Name())
 

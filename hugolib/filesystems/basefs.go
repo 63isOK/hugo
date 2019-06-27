@@ -61,17 +61,26 @@ type BaseFs struct {
 
 func (fs *BaseFs) WatchDirs() []hugofs.FileMetaInfo {
 	var dirs []hugofs.FileMetaInfo
+	for _, dir := range fs.AllDirs() {
+		if dir.Meta().Watch() {
+			dirs = append(dirs, dir)
+		}
+	}
+
+	return dirs
+}
+
+func (fs *BaseFs) AllDirs() []hugofs.FileMetaInfo {
+	var dirs []hugofs.FileMetaInfo
 	for _, dirSet := range [][]hugofs.FileMetaInfo{
+		fs.Archetypes.Dirs,
 		fs.I18n.Dirs,
 		fs.Data.Dirs,
 		fs.Content.Dirs,
 		fs.Assets.Dirs,
+		fs.Resources.Dirs,
 	} {
-		for _, dir := range dirSet {
-			if dir.Meta().Watch() {
-				dirs = append(dirs, dir)
-			}
-		}
+		dirs = append(dirs, dirSet...)
 	}
 
 	return dirs
@@ -106,8 +115,8 @@ type SourceFilesystems struct {
 	// Writable filesystem to the project's resources directory.
 	ResourcesCache afero.Fs
 
-	// This is a unified read-only view of the project's and themes' workdir.
-	Work *SourceFilesystem
+	// The project folder.
+	Work afero.Fs
 
 	// When in multihost we have one static filesystem per language. The sync
 	// static files is currently done outside of the Hugo build (where there is
@@ -130,6 +139,7 @@ type SourceFilesystem struct {
 
 	// This is the base source filesystem. In real Hugo, this will be the OS filesystem.
 	// Use this if you need to resolve items in Dirnames below.
+	// TODO(bep) mod rethink this, also vs themes and symlinks.
 	SourceFs afero.Fs
 
 	// Dirnames is absolute filenames to the directories in this filesystem.
@@ -236,7 +246,8 @@ func (s SourceFilesystems) MakeStaticPathRelative(filename string) string {
 // MakePathRelative creates a relative path from the given filename.
 // It will return an empty string if the filename is not a member of this filesystem.
 func (d *SourceFilesystem) MakePathRelative(filename string) string {
-	for _, currentPath := range d.Dirnames {
+	for _, dir := range d.Dirs {
+		currentPath := dir.(hugofs.FileMetaInfo).Meta().Filename()
 		if strings.HasPrefix(filename, currentPath) {
 			return strings.TrimPrefix(filename, currentPath)
 		}
@@ -271,8 +282,11 @@ func (d *SourceFilesystem) Contains(filename string) bool {
 func (d *SourceFilesystem) RealDirs(from string) []string {
 	var dirnames []string
 	for _, dir := range d.Dirs {
-		dirname := filepath.Join(dir.Meta().Filename(), from)
-		if _, err := d.SourceFs.Stat(dirname); err == nil {
+		meta := dir.Meta()
+		dirname := filepath.Join(meta.Filename(), from)
+		_, err := meta.Fs().Stat(from)
+
+		if err == nil {
 			dirnames = append(dirnames, dirname)
 		}
 	}
@@ -354,7 +368,7 @@ func (b *sourceFilesystemsBuilder) Build() (*SourceFilesystems, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "create main fs")
 		}
-		if theBigFs.overlay == nil {
+		if theBigFs.overlayMounts == nil {
 			panic("createThemesFs returned nil")
 		}
 		b.theBigFs = theBigFs
@@ -364,11 +378,11 @@ func (b *sourceFilesystemsBuilder) Build() (*SourceFilesystems, error) {
 		if b.theBigFs == nil {
 			panic("no fs")
 		}
-		if b.theBigFs.overlay == nil {
+		if b.theBigFs.overlayMounts == nil {
 			panic("no overlay")
 		}
 
-		return b.newSourceFilesystem(afero.NewBasePathFs(b.theBigFs.overlay, id), dirs)
+		return b.newSourceFilesystem(afero.NewBasePathFs(b.theBigFs.overlayMounts, id), dirs)
 
 	}
 
@@ -397,84 +411,16 @@ func (b *sourceFilesystemsBuilder) Build() (*SourceFilesystems, error) {
 	// TODO(bep) mod contentFilesystems probably needs to be reversed
 	contentDirs := b.theBigFs.contentDirs
 
-	contentFs, err := hugofs.NewLanguageFs(b.p.Languages.AsSet(), afero.NewBasePathFs(b.theBigFs.overlay, "content"))
+	contentFs, err := hugofs.NewLanguageFs(b.p.Languages.AsSet(), afero.NewBasePathFs(b.theBigFs.overlayMounts, "content"))
 	if err != nil {
 		return nil, errors.Wrap(err, "create content filesystem")
 	}
 	b.result.Content = b.newSourceFilesystem(contentFs, contentDirs)
 
+	b.result.Work = afero.NewReadOnlyFs(b.theBigFs.overlayFull)
+
 	return b.result, err
 
-}
-
-func (b *sourceFilesystemsBuilder) createFs(
-	mkdir bool,
-	readOnly bool,
-	dirKey, themeFolder string) (*SourceFilesystem, error) {
-	s := &SourceFilesystem{
-		SourceFs: b.sourceFs,
-	}
-
-	if themeFolder == "" {
-		themeFolder = filePathSeparator
-	}
-
-	var dir string
-	if dirKey != "" {
-		dir = b.p.Cfg.GetString(dirKey)
-		if dir == "" {
-			return s, fmt.Errorf("config %q not set", dirKey)
-		}
-	}
-
-	var fs afero.Fs
-
-	absDir := b.p.AbsPathify(dir)
-	existsInSource := b.existsInSource(absDir)
-	if !existsInSource && mkdir {
-		// We really need this directory. Make it.
-		if err := b.sourceFs.MkdirAll(absDir, 0777); err == nil {
-			existsInSource = true
-		}
-	}
-	if existsInSource {
-		fs = newRealBase(afero.NewBasePathFs(b.sourceFs, absDir))
-		s.Dirnames = []string{absDir}
-	}
-
-	if b.hasModules() {
-		if !strings.HasPrefix(themeFolder, filePathSeparator) {
-			themeFolder = filePathSeparator + themeFolder
-		}
-		bfs := afero.NewBasePathFs(b.theBigFs.overlay, themeFolder)
-		themeFolderFs := newRealBase(bfs)
-
-		if fs == nil {
-			fs = themeFolderFs
-		} else {
-			fs = afero.NewCopyOnWriteFs(themeFolderFs, fs)
-		}
-
-		// TODO(bep) mod
-		/*
-			for _, absThemeDir := range b.absThemeDirs {
-				absThemeFolderDir := filepath.Join(absThemeDir, themeFolder)
-				if b.existsInSource(absThemeFolderDir) {
-					s.Dirnames = append(s.Dirnames, absThemeFolderDir)
-				}
-			}
-		*/
-	}
-
-	if fs == nil {
-		s.Fs = hugofs.NoOpFs
-	} else if readOnly {
-		s.Fs = afero.NewReadOnlyFs(fs)
-	} else {
-		s.Fs = fs
-	}
-
-	return s, nil
 }
 
 func (b *sourceFilesystemsBuilder) hasModules() bool {
@@ -517,7 +463,7 @@ func (b *sourceFilesystemsBuilder) createStaticFs() error {
 
 			if b.hasModules() {
 				themeFolder := "static"
-				fs = afero.NewCopyOnWriteFs(newRealBase(afero.NewBasePathFs(b.theBigFs.overlay, themeFolder)), fs)
+				fs = afero.NewCopyOnWriteFs(newRealBase(afero.NewBasePathFs(b.theBigFs.overlayMounts, themeFolder)), fs)
 				// TODO(bep) mod
 				/*for _, absThemeDir := range b.absThemeDirs {
 					s.Dirnames = append(s.Dirnames, filepath.Join(absThemeDir, themeFolder))
@@ -562,7 +508,7 @@ func (b *sourceFilesystemsBuilder) createStaticFs() error {
 
 	if b.hasModules() {
 		themeFolder := "static"
-		fs = afero.NewCopyOnWriteFs(newRealBase(afero.NewBasePathFs(b.theBigFs.overlay, themeFolder)), fs)
+		fs = afero.NewCopyOnWriteFs(newRealBase(afero.NewBasePathFs(b.theBigFs.overlayMounts, themeFolder)), fs)
 		// TODO(bep) mod
 		/*for _, absThemeDir := range b.absThemeDirs {
 			s.Dirnames = append(s.Dirnames, filepath.Join(absThemeDir, themeFolder))
@@ -838,10 +784,12 @@ func (b *sourceFilesystemsBuilder) createModFs(
 	collector.layoutsDirs = append(collector.layoutsDirs, layoutsDirs...)
 	collector.assetsDirs = append(collector.assetsDirs, assetsDirs...)
 
-	if collector.overlay == nil {
-		collector.overlay = rmfs
+	if collector.overlayMounts == nil {
+		collector.overlayMounts = rmfs
+		collector.overlayFull = afero.NewBasePathFs(modBase, md.dir)
 	} else {
-		collector.overlay = hugofs.NewLanguageCompositeFs(collector.overlay, rmfs)
+		collector.overlayMounts = hugofs.NewLanguageCompositeFs(collector.overlayMounts, rmfs)
+		collector.overlayFull = afero.NewCopyOnWriteFs(collector.overlayFull, afero.NewBasePathFs(modBase, md.dir))
 	}
 
 	return nil
@@ -875,9 +823,8 @@ type filesystemsCollector struct {
 	sourceProject afero.Fs // Source for project folders
 	sourceModules afero.Fs // Source for modules/themes
 
-	overlay afero.Fs
-
-	watchDirs []string // TODO(bep) mod
+	overlayMounts afero.Fs
+	overlayFull   afero.Fs
 
 	// These need special merge.
 	contentDirs []hugofs.FileMetaInfo
@@ -888,6 +835,17 @@ type filesystemsCollector struct {
 	// TODO(bep) mod static
 	layoutsDirs []hugofs.FileMetaInfo
 	assetsDirs  []hugofs.FileMetaInfo
+}
+
+// TODO(bep) mod check if we need.
+func (c *filesystemsCollector) allDirs() []hugofs.FileMetaInfo {
+	var dirs []hugofs.FileMetaInfo
+	dirs = append(dirs, c.contentDirs...)
+	dirs = append(dirs, c.i18nDirs...)
+	dirs = append(dirs, c.dataDirs...)
+	dirs = append(dirs, c.layoutsDirs...)
+	dirs = append(dirs, c.assetsDirs...)
+	return dirs
 }
 
 func (c *filesystemsCollector) reverseFileMetaInfos(fis []hugofs.FileMetaInfo) []hugofs.FileMetaInfo {

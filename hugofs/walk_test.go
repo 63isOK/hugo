@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -83,6 +84,9 @@ func _TestWalkRootMappingFs(t *testing.T) {
 }
 
 func TestWalkSymbolicLink(t *testing.T) {
+	if runtime.GOOS == "windows" && os.Getenv("CI") == "" {
+		t.Skip("Skip; os.Symlink needs administrator rights on Windows")
+	}
 	assert := require.New(t)
 	workDir, clean, err := htesting.CreateTempDir(Os, "hugo-walk-sym")
 	assert.NoError(err)
