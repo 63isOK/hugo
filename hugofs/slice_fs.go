@@ -15,9 +15,6 @@ package hugofs
 
 import (
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -293,51 +290,4 @@ func (f *sliceDir) WriteAt(p []byte, off int64) (n int, err error) {
 
 func (f *sliceDir) WriteString(s string) (ret int, err error) {
 	panic("not implemented")
-}
-
-// Try to extract the language from the given filename.
-// Any valid language identificator in the name will win over the
-// language set on the file system, e.g. "mypost.en.md".
-func langInfoFromFil(languages map[string]bool, name string) (string, string, string) {
-	var lang string
-
-	baseName := filepath.Base(name)
-	ext := filepath.Ext(baseName)
-	translationBaseName := baseName
-
-	if ext != "" {
-		translationBaseName = strings.TrimSuffix(translationBaseName, ext)
-	}
-
-	fileLangExt := filepath.Ext(translationBaseName)
-	fileLang := strings.TrimPrefix(fileLangExt, ".")
-
-	if languages[fileLang] {
-		lang = fileLang
-		translationBaseName = strings.TrimSuffix(translationBaseName, fileLangExt)
-	}
-
-	translationBaseNameWithExt := translationBaseName
-
-	if ext != "" {
-		translationBaseNameWithExt += ext
-	}
-
-	return lang, translationBaseName, translationBaseNameWithExt
-
-}
-
-func sortAndremoveStringDuplicates2(s []string) []string {
-	ss := sort.StringSlice(s)
-	ss.Sort()
-	i := 0
-	for j := 1; j < len(s); j++ {
-		if !ss.Less(i, j) {
-			continue
-		}
-		i++
-		s[i] = s[j]
-	}
-
-	return s[:i+1]
 }

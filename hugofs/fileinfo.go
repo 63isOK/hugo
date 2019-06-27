@@ -234,6 +234,14 @@ func decorateFileInfo(
 	fi os.FileInfo,
 	fs afero.Fs, opener func() (afero.File, error),
 	filename, filepath string, inMeta FileMeta) os.FileInfo {
+	return decorateFileInfoW(decid, fi, fs, opener, filename, filepath, "", inMeta)
+}
+
+func decorateFileInfoW(
+	decid string,
+	fi os.FileInfo,
+	fs afero.Fs, opener func() (afero.File, error),
+	filename, filepath, name string, inMeta FileMeta) os.FileInfo {
 
 	var meta FileMeta
 
@@ -241,9 +249,6 @@ func decorateFileInfo(
 
 	if fim, ok := fi.(FileMetaInfo); ok {
 		meta = fim.Meta()
-		if fn, ok := meta[metaKeyFilename]; ok {
-			filename = fn.(string)
-		}
 	} else {
 		meta = make(FileMeta)
 		fim := NewFileMetaInfo(fi, meta)
@@ -263,6 +268,8 @@ func decorateFileInfo(
 		meta[metaKeyOpener] = opener
 
 	}
+
+	//meta.setIfNotZero(metaKeyName, name)
 
 	if fi.IsDir() && fs != nil { // TODO(bep) mod check + argument
 		meta.setIfNotZero(metaKeyFs, fs)

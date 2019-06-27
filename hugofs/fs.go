@@ -23,8 +23,7 @@ import (
 
 var (
 	// Os points to the (real) Os filesystem.
-	Os          = &afero.OsFs{}
-	osDecorated = NewBaseFileDecorator(Os)
+	Os = &afero.OsFs{}
 )
 
 // Fs abstracts the file system to separate source and destination file systems

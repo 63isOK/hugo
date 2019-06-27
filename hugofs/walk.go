@@ -14,6 +14,7 @@
 package hugofs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -213,7 +214,12 @@ func (w *Walkway) walk(path string, info FileMetaInfo, dirEntries []FileMetaInfo
 		meta := fim.Meta()
 
 		// Note that we use the original Name even if it's a symlink.
-		pathn := filepath.Join(path, meta.Name())
+		// TODO(bep) mod reconsider this construct. See rootfs
+		name := meta.Name()
+		if name == "" {
+			panic(fmt.Sprintf("no name set in %v", meta))
+		}
+		pathn := filepath.Join(path, name)
 		pathMeta := pathn
 		if w.basePath != "" {
 			pathMeta = strings.TrimPrefix(pathn, w.basePath)

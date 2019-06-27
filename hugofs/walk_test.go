@@ -79,7 +79,7 @@ func _TestWalkRootMappingFs(t *testing.T) {
 	names, err := collectFilenames(bfs, "", "")
 
 	assert.NoError(err)
-	assert.Equal([]string{"e/f/test.txt", "c/d/test.txt", "a/b/test.txt"}, names)
+	assert.Equal([]string{"a/test.txt", "b/test.txt", "c/test.txt"}, names)
 
 }
 
