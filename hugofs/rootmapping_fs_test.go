@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/viper"
+
 	"github.com/gohugoio/hugo/htesting"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -176,5 +178,52 @@ func TestRootMappingFsOs(t *testing.T) {
 	dirnames, err := root.Readdirnames(-1)
 	assert.NoError(err)
 	assert.Equal([]string{"static/bf1", "static/cf2", "static/af3"}, dirnames)
+
+}
+
+// TODO(bep) mod
+// tc-lib-color/class-Com.Tecnick.Color.Css and class-Com.Tecnick.Color.sv.Css
+
+func TestLanguageRootMapping(t *testing.T) {
+	assert := require.New(t)
+	v := viper.New()
+	v.Set("contentDir", "content")
+
+	fs := afero.NewMemMapFs()
+
+	testfile := "test.txt"
+
+	assert.NoError(afero.WriteFile(fs, filepath.Join("themes/a/mysvblogcontent", testfile), []byte("some sv blog content"), 0755))
+	assert.NoError(afero.WriteFile(fs, filepath.Join("themes/a/myenblogcontent", testfile), []byte("some en blog content in a"), 0755))
+
+	assert.NoError(afero.WriteFile(fs, filepath.Join("themes/a/mysvdocs", testfile), []byte("some sv docs content"), 0755))
+
+	assert.NoError(afero.WriteFile(fs, filepath.Join("themes/b/myenblogcontent", testfile), []byte("some en content"), 0755))
+
+	bfs := DecorateBasePathFs(afero.NewBasePathFs(fs, "themes").(*afero.BasePathFs))
+
+	rfs, err := NewRootMappingFs(bfs,
+		RootMapping{
+			From: "content/blog",      // Virtual path, first element is one of content, static, layouts etc.
+			To:   "a/mysvblogcontent", // Real path
+			Meta: FileMeta{"lang": "sv"},
+		},
+		RootMapping{
+			From: "content/blog",
+			To:   "a/myenblogcontent",
+			Meta: FileMeta{"lang": "en"},
+		},
+		RootMapping{
+			From: "content/docs",
+			To:   "a/mysvdocs",
+			Meta: FileMeta{"lang": "sv"},
+		},
+	)
+
+	assert.NoError(err)
+
+	dirs, err := rfs.Dirs("content/blog")
+	assert.NoError(err)
+	assert.Equal(2, len(dirs))
 
 }

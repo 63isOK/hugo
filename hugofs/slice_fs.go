@@ -14,15 +14,12 @@
 package hugofs
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/gohugoio/hugo/hugofs/files"
 
 	"github.com/pkg/errors"
 
@@ -35,108 +32,19 @@ var (
 	_ afero.File    = (*sliceDir)(nil)
 )
 
-// TODO(bep) mod remove all of the below
-func NewLanguageFs(langs map[string]bool, sources ...FileMetaInfo) (afero.Fs, error) {
-	if len(sources) == 0 {
+func NewSliceFs(dirs ...FileMetaInfo) (afero.Fs, error) {
+	if len(dirs) == 0 {
 		return NoOpFs, nil
 	}
 
-	for _, source := range sources {
-		meta := source.Meta()
-		if meta.Fs() == nil {
-			return nil, errors.New("missing source Fs")
-		}
-
-		if meta.Lang() == "" {
-			return nil, errors.New("missing source lang")
-		}
-	}
-
-	applyMeta := func(fs *SliceFs, source FileMeta, name string, fis []os.FileInfo) {
-
-		for i, fi := range fis {
-			if fi.IsDir() {
-				filename := filepath.Join(name, fi.Name())
-				fis[i] = decorateFileInfo("lfs-dir", fi, fs, fs.getOpener(filename), "", "", nil)
-				continue
-			}
-
-			lang := source.Lang()
-			fileLang, translationBaseName, translationBaseNameWithExt := langInfoFromFil(langs, fi.Name())
-			weight := 0
-
-			if fileLang != "" {
-				weight = 1
-				if fileLang == lang {
-					// Give priority to myfile.sv.txt inside the sv filesystem.
-					weight++
-				}
-				lang = fileLang
-			}
-
-			fim := NewFileMetaInfo(fi, FileMeta{
-				metaKeyLang:                       lang,
-				metaKeyWeight:                     weight,
-				metaKeyTranslationBaseName:        translationBaseName,
-				metaKeyTranslationBaseNameWithExt: translationBaseNameWithExt,
-				metaKeyClassifier:                 files.ClassifyContentFile(fi.Name()),
-			})
-
-			fis[i] = fim
-		}
-
-	}
-
-	all := func(fis []os.FileInfo) {
-		// Maps translation base name to a list of language codes.
-		translations := make(map[string][]string)
-		trackTranslation := func(meta FileMeta) {
-			name := meta.TranslationBaseNameWithExt()
-			translations[name] = append(translations[name], meta.Lang())
-		}
-		for _, fi := range fis {
-			if fi.IsDir() {
-				continue
-			}
-			meta := fi.(FileMetaInfo).Meta()
-
-			trackTranslation(meta)
-
-		}
-
-		for _, fi := range fis {
-			fim := fi.(FileMetaInfo)
-			langs := translations[fim.Meta().TranslationBaseNameWithExt()]
-			if len(langs) > 0 {
-				fim.Meta()["translations"] = sortAndremoveStringDuplicates2(langs)
-			}
-		}
-	}
-
-	return &SliceFs{
-		filesystems:    sources,
-		applyPerSource: applyMeta,
-		applyAll:       all,
-	}, nil
-
-}
-
-func NewSliceFs(sources ...FileMetaInfo) (afero.Fs, error) {
-	if len(sources) == 0 {
-		return NoOpFs, nil
-	}
-
-	applyMeta := func(fs *SliceFs, source FileMeta, name string, fis []os.FileInfo) {
-		for i, fi := range fis {
-			if fi.IsDir() {
-				fis[i] = decorateFileInfo("slicefs-dir", fi, fs, fs.getOpener(fi.(FileMetaInfo).Meta().Filename()), "", "", nil)
-			}
+	for _, dir := range dirs {
+		if !dir.IsDir() {
+			return nil, errors.New("this fs supports directories only")
 		}
 	}
 
 	fs := &SliceFs{
-		filesystems:    sources,
-		applyPerSource: applyMeta,
+		dirs: dirs,
 	}
 
 	return fs, nil
@@ -145,10 +53,7 @@ func NewSliceFs(sources ...FileMetaInfo) (afero.Fs, error) {
 
 // SliceFs is an ordered composite filesystem.
 type SliceFs struct {
-	filesystems []FileMetaInfo
-
-	applyPerSource func(fs *SliceFs, source FileMeta, name string, fis []os.FileInfo)
-	applyAll       func(fis []os.FileInfo)
+	dirs []FileMetaInfo
 }
 
 func (fs *SliceFs) Chmod(n string, m os.FileMode) error {
@@ -160,7 +65,6 @@ func (fs *SliceFs) Chtimes(n string, a, m time.Time) error {
 }
 
 func (fs *SliceFs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-
 	fi, _, err := fs.pickFirst(name)
 
 	if err != nil {
@@ -184,7 +88,7 @@ func (fs *SliceFs) MkdirAll(n string, p os.FileMode) error {
 }
 
 func (fs *SliceFs) Name() string {
-	return "WeightedFileSystem"
+	return "SliceFs"
 }
 
 func (fs *SliceFs) Open(name string) (afero.File, error) {
@@ -197,10 +101,7 @@ func (fs *SliceFs) Open(name string) (afero.File, error) {
 		panic("currently only dirs in here")
 	}
 
-	var debug string
-
 	return &sliceDir{
-		debug:   debug,
 		lfs:     fs,
 		idx:     idx,
 		dirname: name,
@@ -244,7 +145,7 @@ func (fs *SliceFs) getOpener(name string) func() (afero.File, error) {
 }
 
 func (fs *SliceFs) pickFirst(name string) (os.FileInfo, int, error) {
-	for i, mfs := range fs.filesystems {
+	for i, mfs := range fs.dirs {
 		meta := mfs.Meta()
 		fs := meta.Fs()
 		fi, err := lstatIfPossible(fs, name)
@@ -277,17 +178,14 @@ func (fs *SliceFs) readDirs(name string, startIdx, count int) ([]os.FileInfo, er
 			if err != nil {
 				return nil, err
 			}
-			if fs.applyPerSource != nil {
-				fs.applyPerSource(fs, lfs, name, dirs)
-			}
 			return dirs, nil
 		}
 	}
 
 	var dirs []os.FileInfo
 
-	for i := startIdx; i < len(fs.filesystems); i++ {
-		mfs := fs.filesystems[i]
+	for i := startIdx; i < len(fs.dirs); i++ {
+		mfs := fs.dirs[i]
 
 		fis, err := collect(mfs.Meta())
 		if err != nil {
@@ -300,14 +198,17 @@ func (fs *SliceFs) readDirs(name string, startIdx, count int) ([]os.FileInfo, er
 
 	seen := make(map[string]bool)
 	var duplicates []int
-	for i, dir := range dirs {
-		if !dir.IsDir() {
+	for i, fi := range dirs {
+		if !fi.IsDir() {
 			continue
 		}
-		if seen[dir.Name()] {
+
+		if seen[fi.Name()] {
 			duplicates = append(duplicates, i)
 		} else {
-			seen[dir.Name()] = true
+			// Make sure it's opened by this filesystem.
+			dirs[i] = decorateFileInfo("slicefs-dir", fi, fs, fs.getOpener(fi.(FileMetaInfo).Meta().Filename()), "", "", nil)
+			seen[fi.Name()] = true
 		}
 	}
 
@@ -319,10 +220,6 @@ func (fs *SliceFs) readDirs(name string, startIdx, count int) ([]os.FileInfo, er
 		}
 	}
 
-	if fs.applyAll != nil {
-		fs.applyAll(dirs)
-	}
-
 	if count > 0 && len(dirs) >= count {
 		return dirs[:count], nil
 	}
@@ -332,7 +229,6 @@ func (fs *SliceFs) readDirs(name string, startIdx, count int) ([]os.FileInfo, er
 }
 
 type sliceDir struct {
-	debug   string
 	lfs     *SliceFs
 	idx     int
 	dirname string
@@ -342,20 +238,16 @@ func (f *sliceDir) Close() error {
 	return nil
 }
 
-func (f *sliceDir) notImplemented() string {
-	return fmt.Sprintf("this file has directory operations only (%s)", f.debug)
-}
-
 func (f *sliceDir) Name() string {
 	return f.dirname
 }
 
 func (f *sliceDir) Read(p []byte) (n int, err error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) ReadAt(p []byte, off int64) (n int, err error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) Readdir(count int) ([]os.FileInfo, error) {
@@ -376,31 +268,31 @@ func (f *sliceDir) Readdirnames(count int) ([]string, error) {
 }
 
 func (f *sliceDir) Seek(offset int64, whence int) (int64, error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) Stat() (os.FileInfo, error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) Sync() error {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) Truncate(size int64) error {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) Write(p []byte) (n int, err error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) WriteAt(p []byte, off int64) (n int, err error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 func (f *sliceDir) WriteString(s string) (ret int, err error) {
-	panic(f.notImplemented())
+	panic("not implemented")
 }
 
 // Try to extract the language from the given filename.

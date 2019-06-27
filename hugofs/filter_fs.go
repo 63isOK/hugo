@@ -36,7 +36,7 @@ var (
 	_ afero.File    = (*filterDir)(nil)
 )
 
-func NewLanguageFs2(langs map[string]bool, fs afero.Fs) (afero.Fs, error) {
+func NewLanguageFs(langs map[string]bool, fs afero.Fs) (afero.Fs, error) {
 
 	applyMeta := func(fs *FilterFs, name string, fis []os.FileInfo) {
 
